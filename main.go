@@ -7,15 +7,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/timer"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type Model struct {
-	currentLines []string
-	targetText   string
-	userInput    string
-	cursorPos    int
+	currentLines   []string
+	targetText     string
+	userInput      string
+	cursorPos      int
+	showPrompt     bool
+	prompt         string
+	countdownTimer timer.Model
+	timerStarted   bool
+}
+
+func NewModel() Model {
+	randomSentences := generateSentences(generateWords())
+	return Model{
+		targetText:     randomSentences[0],
+		userInput:      "",
+		cursorPos:      0,
+		currentLines:   randomSentences,
+		showPrompt:     false,
+		prompt:         "",
+		countdownTimer: timer.NewWithInterval(5*time.Second, time.Second),
+		timerStarted:   false,
+	}
 }
 
 func generateWords() []string {
@@ -65,23 +84,20 @@ func generateSentences(wordCorpus []string) []string {
 	return sentences
 }
 
-func NewModel() Model {
-	randomSentences := generateSentences(generateWords())
-	return Model{
-		targetText:   randomSentences[0],
-		userInput:    "",
-		cursorPos:    0,
-		currentLines: randomSentences,
-	}
-}
-
 func (m Model) Init() tea.Cmd {
 	return nil
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if !m.timerStarted {
+			m.timerStarted = true
+			cmds = append(cmds, m.countdownTimer.Init())
+		}
+
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			return m, tea.Quit
@@ -90,8 +106,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.userInput = m.userInput[:len(m.userInput)-1]
 				m.cursorPos--
 			}
+		case "tab":
+			m.showPrompt = true
+			m.prompt = "🔄 Restart test?"
 
 		case "enter":
+			if m.showPrompt == true {
+				m.countdownTimer.Stop()
+				m = NewModel()
+				return m, nil
+			}
 		default:
 			if len(m.userInput) < len(m.targetText) {
 				m.userInput += msg.String()
@@ -104,8 +128,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
+	case timer.TickMsg:
+		var cmd tea.Cmd
+		m.countdownTimer, cmd = m.countdownTimer.Update(msg)
+		cmds = append(cmds, cmd)
+
+	case timer.TimeoutMsg:
+		m = NewModel()
 	}
-	return m, nil
+
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) View() string {
@@ -126,10 +159,13 @@ func (m Model) View() string {
 	}
 	m.targetText = generateSentences(generateWords())[2]
 
-	return fmt.Sprintf("%s\n%s\n%s",
+	return fmt.Sprintf("%s\n\n%s\n%s\n%s\n\n%s",
+		m.countdownTimer.View(),
 		output.String(),
 		m.currentLines[1],
-		m.currentLines[2])
+		m.currentLines[2],
+		m.prompt,
+	)
 }
 
 func main() {
